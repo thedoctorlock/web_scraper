@@ -1,0 +1,16 @@
+# Ignore Google service account credentials
+tuuthfairy-scraper-e255017bd539.json
+
+# Ignore config json
+config.json
+
+# Ignore Python virtual environment
+env/
+venv/
+
+# Ignore macOS system files
+.DS_Store
+
+# Ignore compiled Python files
+__pycache__/
+*.pyc
