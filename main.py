@@ -3,6 +3,7 @@
 import json
 import logging
 from datetime import datetime
+import os
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -116,9 +117,17 @@ def main():
     redash_rows = fetch_redash_csv(redash_url, api_key=api_key)
     location_map = build_location_map(redash_rows)
 
-    # Set up Chrome in headless mode
+    # Configure Chrome in 'stealth' headless mode
     options = Options()
-    #options.add_argument("--headless")
+    options.add_argument("--headless=new")  # For Chrome 109+ 
+    options.add_argument(
+        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.5481.77 Safari/537.36"
+    )
+    # Hide the "Chrome is being controlled by automated test software" banner 
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
+
     driver = webdriver.Chrome(options=options)
 
     try:
@@ -161,7 +170,17 @@ def main():
         upload_data_to_google_sheets(worksheet, regrouped_data)
 
         logger.info("Done!")
-    except Exception as e:
+    except Exception:
+        # Save screenshot & page source for debugging
+        screenshot_path = os.path.join(os.getcwd(), "headless_timeout.png")
+        driver.save_screenshot(screenshot_path)
+        logger.info("Saved screenshot to %s", screenshot_path)
+
+        html_path = os.path.join(os.getcwd(), "headless_timeout.html")
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(driver.page_source)
+        logger.info("Saved page source to %s", html_path)
+
         logger.exception("An error occurred during main execution.")
     finally:
         driver.quit()

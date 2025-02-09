@@ -36,3 +36,58 @@ selenium.common.exceptions.TimeoutException: Message:
 2025-02-09 02:30:22,160 [INFO] data_filter - Finished regroup_and_merge_locations: 4 unique connections.
 2025-02-09 02:30:24,213 [INFO] google_sheets - Data successfully uploaded to Google Sheets (auth_failed tab)!
 2025-02-09 02:30:24,213 [INFO] __main__ - Done!
+2025-02-09 02:38:04,891 [INFO] __main__ - Launching script...
+2025-02-09 02:38:06,373 [INFO] __main__ - Fetched practice groups from 'Tuuthfairy Groups' where Status=Run: {'SGA', 'Town Dentistry', 'Oak Dental Partners', 'Sonrava', 'Mosaic Dental Collective', 'PepperPointe', 'Oakpoint', 'Healthy Smiles Dentists', 'Texas Tiny Teeth', 'Imagen Dental Partners', 'Peak Dental', 'Specialty1 (S1P)'}
+2025-02-09 02:38:06,373 [INFO] redash_data - Fetching Redash CSV from https://redash.smylen.com/api/queries/335/results.csv?api_key=wstmlp4LUOyfD9AsWif0N8EUUnx6Evbo7asGhngs
+2025-02-09 02:38:08,167 [INFO] redash_data - Successfully parsed 77565 rows from Redash CSV.
+2025-02-09 02:38:08,168 [INFO] redash_data - Building location map from Redash rows. Total rows: 77565
+2025-02-09 02:38:08,173 [INFO] redash_data - Built location map with 4752 unique locationIds.
+2025-02-09 02:38:16,283 [INFO] scraper - Found input#username on main page (no iframe).
+2025-02-09 02:39:16,938 [ERROR] __main__ - An error occurred during main execution.
+Traceback (most recent call last):
+  File "/Users/jackgallagher/Documents/Projects/web_scraper/main.py", line 126, in main
+    ensure_logged_in(driver, AUTH0_EMAIL, AUTH0_PASSWORD)
+  File "/Users/jackgallagher/Documents/Projects/web_scraper/scraper.py", line 64, in ensure_logged_in
+    WebDriverWait(driver, 60).until(
+  File "/Users/jackgallagher/Documents/Projects/web_scraper/env/lib/python3.11/site-packages/selenium/webdriver/support/wait.py", line 146, in until
+    raise TimeoutException(message, screen, stacktrace)
+selenium.common.exceptions.TimeoutException: Message: 
+
+2025-02-09 02:39:50,064 [INFO] __main__ - Launching script...
+2025-02-09 02:39:51,604 [INFO] __main__ - Fetched practice groups from 'Tuuthfairy Groups' where Status=Run: {'Healthy Smiles Dentists', 'Mosaic Dental Collective', 'Peak Dental', 'PepperPointe', 'Oak Dental Partners', 'Oakpoint', 'Town Dentistry', 'Texas Tiny Teeth', 'SGA', 'Specialty1 (S1P)', 'Imagen Dental Partners', 'Sonrava'}
+2025-02-09 02:39:51,604 [INFO] redash_data - Fetching Redash CSV from https://redash.smylen.com/api/queries/335/results.csv?api_key=wstmlp4LUOyfD9AsWif0N8EUUnx6Evbo7asGhngs
+2025-02-09 02:39:53,314 [INFO] redash_data - Successfully parsed 77565 rows from Redash CSV.
+2025-02-09 02:39:53,315 [INFO] redash_data - Building location map from Redash rows. Total rows: 77565
+2025-02-09 02:39:53,321 [INFO] redash_data - Built location map with 4752 unique locationIds.
+2025-02-09 02:40:00,958 [INFO] scraper - Found input#username on main page (no iframe).
+2025-02-09 02:41:01,656 [ERROR] __main__ - An error occurred during main execution.
+Traceback (most recent call last):
+  File "/Users/jackgallagher/Documents/Projects/web_scraper/main.py", line 127, in main
+    ensure_logged_in(driver, AUTH0_EMAIL, AUTH0_PASSWORD)
+  File "/Users/jackgallagher/Documents/Projects/web_scraper/scraper.py", line 64, in ensure_logged_in
+    WebDriverWait(driver, 60).until(
+  File "/Users/jackgallagher/Documents/Projects/web_scraper/env/lib/python3.11/site-packages/selenium/webdriver/support/wait.py", line 146, in until
+    raise TimeoutException(message, screen, stacktrace)
+selenium.common.exceptions.TimeoutException: Message: 
+
+2025-02-09 02:54:34,575 [INFO] __main__ - Launching script...
+2025-02-09 02:54:36,195 [INFO] __main__ - Fetched practice groups from 'Tuuthfairy Groups' where Status=Run: {'Oakpoint', 'PepperPointe', 'Specialty1 (S1P)', 'SGA', 'Peak Dental', 'Oak Dental Partners', 'Texas Tiny Teeth', 'Mosaic Dental Collective', 'Imagen Dental Partners', 'Healthy Smiles Dentists', 'Sonrava', 'Town Dentistry'}
+2025-02-09 02:54:36,195 [INFO] redash_data - Fetching Redash CSV from https://redash.smylen.com/api/queries/335/results.csv?api_key=wstmlp4LUOyfD9AsWif0N8EUUnx6Evbo7asGhngs
+2025-02-09 02:54:37,724 [INFO] redash_data - Successfully parsed 77565 rows from Redash CSV.
+2025-02-09 02:54:37,725 [INFO] redash_data - Building location map from Redash rows. Total rows: 77565
+2025-02-09 02:54:37,730 [INFO] redash_data - Built location map with 4752 unique locationIds.
+2025-02-09 02:54:45,394 [INFO] scraper - Found input#username on main page (no iframe).
+2025-02-09 02:54:48,076 [INFO] scraper - Dashboard loaded after login (Connections link found).
+2025-02-09 02:54:48,165 [INFO] scraper - Clicked 'Connections' link in sidebar.
+2025-02-09 02:54:49,188 [INFO] scraper - Connections table loaded.
+2025-02-09 02:55:20,141 [INFO] scraper - Scraped 292 records from connections table.
+2025-02-09 02:55:20,145 [INFO] data_filter - Filtering by valid practice groups: {'Oakpoint', 'PepperPointe', 'Specialty1 (S1P)', 'SGA', 'Peak Dental', 'Oak Dental Partners', 'Texas Tiny Teeth', 'Mosaic Dental Collective', 'Imagen Dental Partners', 'Healthy Smiles Dentists', 'Sonrava', 'Town Dentistry'}
+2025-02-09 02:55:20,146 [INFO] data_filter - filter_by_practice_groups: 1881 rows in, 733 rows out
+2025-02-09 02:55:20,146 [INFO] data_filter - Filtering rows for 'auth_failed' status.
+2025-02-09 02:55:20,146 [INFO] data_filter - filter_auth_failed: 733 rows in, 64 rows out
+2025-02-09 02:55:20,146 [INFO] data_filter - Excluding websites: {'unumdentalpwp.skygenusasystems.com'}
+2025-02-09 02:55:20,146 [INFO] data_filter - exclude_websites: 64 rows in, 23 rows out
+2025-02-09 02:55:20,146 [INFO] data_filter - Regrouping and merging locationIds across 23 rows.
+2025-02-09 02:55:20,146 [INFO] data_filter - Finished regroup_and_merge_locations: 4 unique connections.
+2025-02-09 02:55:21,792 [INFO] google_sheets - Data successfully uploaded to Google Sheets (auth_failed tab)!
+2025-02-09 02:55:21,792 [INFO] __main__ - Done!

@@ -12,15 +12,16 @@ def ensure_logged_in(driver, auth0_email, auth0_password):
     """
     Load /auth/login (redirects to Auth0).
     Fill credentials if the login form is found.
-    Wait until the URL indicates we're back on dashboard.tuuthfairy.com.
+    Wait until a known dashboard element is present (the 'Connections' link),
+    rather than checking the URL substring. 
     """
     driver.get("https://dashboard.tuuthfairy.com/auth/login")
-    time.sleep(5)  # Let any redirect or page load happen
-
+    time.sleep(5)  # Let the initial redirect or page load happen
     logger.debug("After hitting /auth/login, current URL = %s", driver.current_url)
 
     found_login_form = False
 
+    # Attempt to find login fields outside an iframe
     try:
         WebDriverWait(driver, 5).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "input#username"))
@@ -29,6 +30,7 @@ def ensure_logged_in(driver, auth0_email, auth0_password):
         found_login_form = True
     except:
         logger.info("No direct #username found on main page; checking for iframe...")
+        # Attempt to switch to an iframe with login fields
         try:
             WebDriverWait(driver, 5).until(
                 EC.frame_to_be_available_and_switch_to_it((By.CSS_SELECTOR, "iframe"))
@@ -60,11 +62,13 @@ def ensure_logged_in(driver, auth0_email, auth0_password):
         except:
             pass
 
-        # Wait until the URL indicates we're back on the main dashboard
-        WebDriverWait(driver, 60).until(
-            lambda d: "dashboard.tuuthfairy.com" in d.current_url
-        )
-        logger.info("Redirected back to dashboard.tuuthfairy.com after login.")
+    # Instead of waiting on the URL to contain 'dashboard.tuuthfairy.com', 
+    # wait for the 'Connections' link that only appears if you're fully logged in.
+    # Increase from 60 to 120 seconds to handle slower or suspicious flows.
+    WebDriverWait(driver, 120).until(
+        EC.presence_of_element_located((By.CSS_SELECTOR, 'a[href="/connection"]'))
+    )
+    logger.info("Dashboard loaded after login (Connections link found).")
 
 def click_connections_link(driver):
     """
@@ -102,7 +106,7 @@ def scrape_connections_table(driver):
                     "WebsiteId": cells[1].text.strip(),
                     "Username": cells[2].text.strip(),
                     "Status": cells[3].text.strip(),
-                    "Locations": cells[4].text.strip(),  # Cleaned later
+                    "Locations": cells[4].text.strip(),  # cleaned in process_location_field
                     "LastUpdated": cells[5].text.strip(),
                 }
                 all_records.append(record)
