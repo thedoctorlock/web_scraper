@@ -1,19 +1,16 @@
 # data_filter.py
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 def filter_by_practice_groups(expanded_data, valid_practice_groups):
     """
     Filter the list of expanded data rows to only include rows whose
     practiceGroupName is in valid_practice_groups. We normalize by stripping
     and lowercasing both sides to avoid subtle mismatches.
-
-    Parameters:
-      expanded_data (list of dict)
-      valid_practice_groups (iterable of str)
-
-    Returns:
-      list of dict
     """
-    # Build a normalized set from your config
+    logger.info("Filtering by valid practice groups: %s", valid_practice_groups)
     normalized_set = {pg.strip().lower() for pg in valid_practice_groups}
 
     filtered = []
@@ -21,23 +18,37 @@ def filter_by_practice_groups(expanded_data, valid_practice_groups):
         pg_name = row.get("practiceGroupName", "").strip().lower()
         if pg_name in normalized_set:
             filtered.append(row)
-    return filtered
 
+    logger.info(
+        "filter_by_practice_groups: %d rows in, %d rows out",
+        len(expanded_data), len(filtered)
+    )
+    return filtered
 
 def filter_auth_failed(rows):
     """
     Return only rows where Status == 'auth_failed'.
     """
-    return [row for row in rows if row["Status"] == "auth_failed"]
-
+    logger.info("Filtering rows for 'auth_failed' status.")
+    filtered = [row for row in rows if row["Status"] == "auth_failed"]
+    logger.info(
+        "filter_auth_failed: %d rows in, %d rows out",
+        len(rows), len(filtered)
+    )
+    return filtered
 
 def exclude_websites(rows, excluded_sites):
     """
     Exclude rows where row["WebsiteId"] is in the set/list of excluded_sites.
     e.g., excluded_sites = {"unumdentalpwp.skygenusasystems.com"}
     """
-    return [row for row in rows if row["WebsiteId"] not in excluded_sites]
-
+    logger.info("Excluding websites: %s", excluded_sites)
+    filtered = [row for row in rows if row["WebsiteId"] not in excluded_sites]
+    logger.info(
+        "exclude_websites: %d rows in, %d rows out",
+        len(rows), len(filtered)
+    )
+    return filtered
 
 def regroup_and_merge_locations(rows):
     """
@@ -46,6 +57,7 @@ def regroup_and_merge_locations(rows):
 
     Each connection (ID) appears only once and the locationIds are concatenated.
     """
+    logger.info("Regrouping and merging locationIds across %d rows.", len(rows))
     grouped = {}
 
     for row in rows:
@@ -65,10 +77,8 @@ def regroup_and_merge_locations(rows):
         if row.get("locationId"):
             grouped[conn_id]["locationIds"].append(row["locationId"])
 
-    # Build final merged data
     merged_data = []
     for conn_id, agg in grouped.items():
-        # Join multiple locationIds with commas
         location_str = ", ".join(agg["locationIds"]) if agg["locationIds"] else ""
         merged_data.append({
             "ID": agg["ID"],
@@ -80,4 +90,6 @@ def regroup_and_merge_locations(rows):
             "practiceGroupName": agg["practiceGroupName"],
             "locationId": location_str
         })
+
+    logger.info("Finished regroup_and_merge_locations: %d unique connections.", len(merged_data))
     return merged_data

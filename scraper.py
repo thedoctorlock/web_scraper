@@ -1,9 +1,12 @@
 # scraper.py
+
 import time
-from selenium import webdriver
+import logging
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+
+logger = logging.getLogger(__name__)
 
 def ensure_logged_in(driver, auth0_email, auth0_password):
     """
@@ -12,9 +15,9 @@ def ensure_logged_in(driver, auth0_email, auth0_password):
     Wait until the URL indicates we're back on dashboard.tuuthfairy.com.
     """
     driver.get("https://dashboard.tuuthfairy.com/auth/login")
-    time.sleep(5)  # Let it redirect or load
+    time.sleep(5)  # Let any redirect or page load happen
 
-    print("DEBUG: after hitting /auth/login, current URL =", driver.current_url)
+    logger.debug("After hitting /auth/login, current URL = %s", driver.current_url)
 
     found_login_form = False
 
@@ -22,10 +25,10 @@ def ensure_logged_in(driver, auth0_email, auth0_password):
         WebDriverWait(driver, 5).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "input#username"))
         )
-        print("Found input#username on main page (no iframe).")
+        logger.info("Found input#username on main page (no iframe).")
         found_login_form = True
     except:
-        print("No direct #username found on main page; checking for iframe...")
+        logger.info("No direct #username found on main page; checking for iframe...")
         try:
             WebDriverWait(driver, 5).until(
                 EC.frame_to_be_available_and_switch_to_it((By.CSS_SELECTOR, "iframe"))
@@ -33,10 +36,10 @@ def ensure_logged_in(driver, auth0_email, auth0_password):
             WebDriverWait(driver, 5).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "input#username"))
             )
-            print("Found #username in iframe.")
+            logger.info("Found #username in iframe.")
             found_login_form = True
         except:
-            print("No #username found, possibly already logged in.")
+            logger.info("No #username found, possibly already logged in.")
             pass
 
     if found_login_form:
@@ -51,40 +54,37 @@ def ensure_logged_in(driver, auth0_email, auth0_password):
         login_btn = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
         login_btn.click()
 
-        # If we switched into an iframe, switch out
+        # If we switched to an iframe, switch back
         try:
             driver.switch_to.default_content()
         except:
             pass
 
-        # Wait until the URL indicates we're back on dashboard.tuuthfairy.com
+        # Wait until the URL indicates we're back on the main dashboard
         WebDriverWait(driver, 60).until(
             lambda d: "dashboard.tuuthfairy.com" in d.current_url
         )
-        print("Redirected back to dashboard.tuuthfairy.com after login.")
-
+        logger.info("Redirected back to dashboard.tuuthfairy.com after login.")
 
 def click_connections_link(driver):
     """
-    Click the 'Connections' link in the sidebar, then wait for the table.
+    Click the 'Connections' link in the sidebar, then wait for the table to appear.
     """
     WebDriverWait(driver, 30).until(
         EC.element_to_be_clickable((By.CSS_SELECTOR, 'a[href="/connection"]'))
     )
     link = driver.find_element(By.CSS_SELECTOR, 'a[href="/connection"]')
     link.click()
-    print("Clicked 'Connections' link in sidebar.")
+    logger.info("Clicked 'Connections' link in sidebar.")
 
     WebDriverWait(driver, 30).until(
         EC.presence_of_element_located((By.CSS_SELECTOR, "table tbody tr"))
     )
-    print("Connections table loaded.")
-
+    logger.info("Connections table loaded.")
 
 def scrape_connections_table(driver):
     """
-    Scrape the entire Connections table across all paginated pages.
-    Returns a list of dict records.
+    Scrape the entire Connections table across all pages. Returns a list of dicts.
     """
     all_records = []
 
@@ -102,11 +102,12 @@ def scrape_connections_table(driver):
                     "WebsiteId": cells[1].text.strip(),
                     "Username": cells[2].text.strip(),
                     "Status": cells[3].text.strip(),
-                    "Locations": cells[4].text.strip(),  # Will process this later
+                    "Locations": cells[4].text.strip(),  # Cleaned later
                     "LastUpdated": cells[5].text.strip(),
                 }
                 all_records.append(record)
 
+        # Check if there's a 'Next' button
         next_buttons = driver.find_elements(By.XPATH, "//a[contains(text(), 'Next')]")
         if not next_buttons:
             break
@@ -114,4 +115,5 @@ def scrape_connections_table(driver):
             next_buttons[0].click()
             time.sleep(2)
 
+    logger.info("Scraped %d records from connections table.", len(all_records))
     return all_records

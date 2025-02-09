@@ -1,9 +1,12 @@
 # main.py
 
 import json
-from selenium import webdriver
+import logging
+from datetime import datetime
 
-# (1) Import your existing helpers
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+
 from scraper import ensure_logged_in, click_connections_link, scrape_connections_table
 from redash_data import fetch_redash_csv, build_location_map
 from data_filter import (
@@ -14,6 +17,53 @@ from data_filter import (
 )
 from google_sheets import setup_google_sheets_client, upload_data_to_google_sheets
 from location_helpers import process_location_field
+
+# Configure logging
+logging.basicConfig(
+    filename="tuuthfairy_scraper.log",
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+def load_practice_groups_from_sheet(
+    service_account_file, 
+    spreadsheet_name, 
+    practice_list_tab="Tuuthfairy Groups"
+):
+    """
+    Reads Column A ("Status") and Column B ("Practice Group") from 'Tuuthfairy Groups'.
+    Skips the header row (row 1).
+    Returns a set of group names from rows where Status == "Run".
+    """
+    import gspread
+    from google.oauth2.service_account import Credentials
+
+    creds = Credentials.from_service_account_file(service_account_file)
+    scoped = creds.with_scopes([
+        "https://www.googleapis.com/auth/drive",
+        "https://www.googleapis.com/auth/spreadsheets",
+    ])
+    client = gspread.authorize(scoped)
+
+    spreadsheet = client.open(spreadsheet_name)
+    worksheet = spreadsheet.worksheet(practice_list_tab)
+
+    # Grab column A (Status) and column B (Practice Group)
+    status_col = worksheet.col_values(1)  # A
+    groups_col = worksheet.col_values(2)  # B
+
+    valid_practice_groups = []
+    min_len = min(len(status_col), len(groups_col))
+
+    # Skip header row (index 0)
+    for i in range(1, min_len):
+        status_value = status_col[i].strip()
+        group_name = groups_col[i].strip()
+        if status_value.lower() == "run":
+            valid_practice_groups.append(group_name)
+
+    return set(valid_practice_groups)
 
 def load_config(config_path="config.json"):
     with open(config_path, "r") as f:
@@ -40,43 +90,46 @@ def _combine(scraped_record, loc_id, redash_info):
     return new_entry
 
 def main():
-    print("Launching script...")
+    logger.info("Launching script...")
     config = load_config("config.json")
 
-    # Make sure these keys match your config.json
     SERVICE_ACCOUNT_FILE = config["service_account_file"]
-    SHEET_NAME = config["sheet_name"]
+    SHEET_NAME = config["sheet_name"]          # The name of the Google Spreadsheet
     AUTH0_EMAIL = config["auth0_email"]
     AUTH0_PASSWORD = config["auth0_password"]
     
-    # Ensure you have "redash_url" and "redash_api_key" in your config
     redash_url = config["redash_url"]
     api_key = config["redash_api_key"]
 
-    # Load valid practice groups from config
-    valid_practice_groups = set(config.get("valid_practice_groups", []))
-
-    # If you have a list of websites to exclude, you can keep it in config.json, e.g.:
-    # { "excluded_websites": ["unumdentalpwp.skygenusasystems.com"] }
-    # or just define inline:
+    # Websites we want to exclude, if any
     excluded_domains = {"unumdentalpwp.skygenusasystems.com"}
 
-    # Fetch Redash CSV and build location -> practice group map
+    # Load practice groups from 'Tuuthfairy Groups' sheet, but only for rows marked "Run"
+    valid_practice_groups = load_practice_groups_from_sheet(
+        SERVICE_ACCOUNT_FILE, 
+        SHEET_NAME, 
+        practice_list_tab="Tuuthfairy Groups"
+    )
+    logger.info("Fetched practice groups from 'Tuuthfairy Groups' where Status=Run: %s", valid_practice_groups)
+
+    # Fetch Redash CSV, build location -> practice group map
     redash_rows = fetch_redash_csv(redash_url, api_key=api_key)
     location_map = build_location_map(redash_rows)
 
-    driver = webdriver.Chrome()
-    try:
-        # Login to the dashboard
-        ensure_logged_in(driver, AUTH0_EMAIL, AUTH0_PASSWORD)
+    # Set up Chrome in headless mode
+    options = Options()
+    #options.add_argument("--headless")
+    driver = webdriver.Chrome(options=options)
 
-        # Navigate to connections
+    try:
+        # Login and navigate
+        ensure_logged_in(driver, AUTH0_EMAIL, AUTH0_PASSWORD)
         click_connections_link(driver)
 
         # Scrape data
         all_data = scrape_connections_table(driver)
 
-        # Clean the location fields (split, remove 'airpay_', etc.)
+        # Clean location fields
         for record in all_data:
             cleaned_locations = process_location_field(record["Locations"])
             record["Locations"] = cleaned_locations
@@ -85,10 +138,8 @@ def main():
         expanded_data = []
         for record in all_data:
             if not record["Locations"]:
-                # If no locations, still create a row with empty location & practice group
                 expanded_data.append(_combine(record, None, None))
                 continue
-
             for loc_id in record["Locations"]:
                 redash_info = location_map.get(loc_id, None)
                 expanded_data.append(_combine(record, loc_id, redash_info))
@@ -100,17 +151,18 @@ def main():
         auth_failed_data = filter_auth_failed(filtered_data)
 
         # 3) Exclude any unwanted websites
-        #    e.g. 'unumdentalpwp.skygenusasystems.com'
         final_filtered_data = exclude_websites(auth_failed_data, excluded_domains)
 
         # 4) Group multiple locationIds into a single row for each ID
         regrouped_data = regroup_and_merge_locations(final_filtered_data)
 
-        # Upload to Google Sheets
-        worksheet = setup_google_sheets_client(SERVICE_ACCOUNT_FILE, SHEET_NAME)
+        # Upload to Google Sheets (auth_failed tab)
+        worksheet = setup_google_sheets_client(SERVICE_ACCOUNT_FILE, SHEET_NAME, worksheet_name="auth_failed")
         upload_data_to_google_sheets(worksheet, regrouped_data)
-        print("Done!")
 
+        logger.info("Done!")
+    except Exception as e:
+        logger.exception("An error occurred during main execution.")
     finally:
         driver.quit()
 
