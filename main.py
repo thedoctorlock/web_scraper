@@ -18,6 +18,7 @@ from data_filter import (
 )
 from google_sheets import setup_google_sheets_client, upload_data_to_google_sheets
 from location_helpers import process_location_field
+from local_history import append_run_data  # <-- NEW IMPORT
 
 # Configure logging
 logging.basicConfig(
@@ -111,20 +112,19 @@ def main():
         SHEET_NAME, 
         practice_list_tab="Tuuthfairy Groups"
     )
-    logger.info("Fetched practice groups from 'Tuuthfairy Groups' where Status=Run: %s", valid_practice_groups)
+    logger.info("Fetched practice groups: %s", valid_practice_groups)
 
     # Fetch Redash CSV, build location -> practice group map
     redash_rows = fetch_redash_csv(redash_url, api_key=api_key)
     location_map = build_location_map(redash_rows)
 
-    # Configure Chrome in 'stealth' headless mode
+    # Configure Chrome in headless mode
     options = Options()
-    options.add_argument("--headless=new")  # For Chrome 109+ 
+    options.add_argument("--headless=new")  # For Chrome 109+
     options.add_argument(
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.5481.77 Safari/537.36"
     )
-    # Hide the "Chrome is being controlled by automated test software" banner 
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
 
@@ -165,7 +165,10 @@ def main():
         # 4) Group multiple locationIds into a single row for each ID
         regrouped_data = regroup_and_merge_locations(final_filtered_data)
 
-        # Upload to Google Sheets (auth_failed tab)
+        # (B) Local Historical Log
+        append_run_data(regrouped_data)
+
+        # (A) Overwrite Google Sheets
         worksheet = setup_google_sheets_client(SERVICE_ACCOUNT_FILE, SHEET_NAME, worksheet_name="auth_failed")
         upload_data_to_google_sheets(worksheet, regrouped_data)
 

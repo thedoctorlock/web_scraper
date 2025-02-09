@@ -14,3 +14,9 @@ venv/
 # Ignore compiled Python files
 __pycache__/
 *.pyc
+
+# Ignore log files
+*.log
+
+#Ignore local history csv file
+auth_failed_history.csv

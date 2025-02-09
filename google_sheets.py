@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 def setup_google_sheets_client(service_account_file, sheet_name, worksheet_name="auth_failed"):
     """
-    Opens the specified Google Spreadsheet and returns the 'auth_failed' worksheet (by default).
+    Opens the specified Google Spreadsheet and returns the given worksheet (default: 'auth_failed').
     """
     creds = Credentials.from_service_account_file(service_account_file)
     scoped = creds.with_scopes([
@@ -18,23 +18,23 @@ def setup_google_sheets_client(service_account_file, sheet_name, worksheet_name=
     ])
     client = gspread.authorize(scoped)
     spreadsheet = client.open(sheet_name)
-
-    # Instead of using spreadsheet.sheet1, explicitly open the 'auth_failed' tab
     worksheet = spreadsheet.worksheet(worksheet_name)
     return worksheet
 
 def upload_data_to_google_sheets(worksheet, data):
     """
-    Instead of clearing the sheet and overwriting everything, we:
-      1) Ensure row 1 has our header.
-      2) Insert the new rows at row 2, so the newest is always on top.
-      3) Include a new column called 'FetchedAt' for a timestamp of when the data was pulled.
+    Overwrites the entire worksheet with the new data.
+    1) Clear the sheet.
+    2) Re-insert the header in row 1.
+    3) Insert all rows starting at row 2.
     """
+
     if not data:
-        logger.info("No data to upload.")
+        logger.info("No data to upload. Clearing the sheet just in case.")
+        worksheet.clear()
         return
 
-    # Define the updated header, including the new timestamp column
+    # Define the header (including 'FetchedAt')
     header = [
         "ID",
         "WebsiteId",
@@ -47,22 +47,16 @@ def upload_data_to_google_sheets(worksheet, data):
         "FetchedAt"
     ]
 
-    # Check existing sheet content
-    existing_values = worksheet.get_all_values()
+    # Clear the entire worksheet
+    worksheet.clear()
 
-    # If empty or missing columns, insert/update the header
-    if not existing_values:
-        logger.info("Sheet is empty, inserting header row.")
-        worksheet.insert_row(header, 1)
-    else:
-        # Optionally, you could check if existing_values[0] == header.
-        # But typically, if your columns match, this is enough.
-        pass
+    # Insert header at row 1
+    worksheet.insert_row(header, 1)
 
-    # Append new rows at the top (below the header)
-    # We'll use one timestamp for this entire run, or you could do per-row if you like
+    # We'll use one timestamp for this upload run
     fetch_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    # Build rows to insert
     new_rows = []
     for record in data:
         row = [
@@ -78,7 +72,7 @@ def upload_data_to_google_sheets(worksheet, data):
         ]
         new_rows.append(row)
 
-    # Insert these rows at row 2, pushing older data downward
+    # Insert all new rows below the header
     worksheet.insert_rows(new_rows, 2)
 
-    logger.info("Data successfully uploaded to Google Sheets (auth_failed tab)!")
+    logger.info("Data successfully overwritten in Google Sheets (auth_failed tab).")
