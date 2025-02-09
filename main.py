@@ -8,7 +8,8 @@ import os
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 
-from scraper import ensure_logged_in, click_connections_link, scrape_connections_table
+# We've replaced click_connections_link with go_directly_to_connections
+from scraper import ensure_logged_in, go_directly_to_connections, scrape_connections_table
 from redash_data import fetch_redash_csv, build_location_map
 from data_filter import (
     filter_by_practice_groups,
@@ -18,7 +19,7 @@ from data_filter import (
 )
 from google_sheets import setup_google_sheets_client, upload_data_to_google_sheets
 from location_helpers import process_location_field
-from local_history import append_run_data  # <-- NEW IMPORT
+from local_history import append_run_data  # logs final data locally
 
 # Configure logging
 logging.basicConfig(
@@ -33,11 +34,6 @@ def load_practice_groups_from_sheet(
     spreadsheet_name, 
     practice_list_tab="Tuuthfairy Groups"
 ):
-    """
-    Reads Column A ("Status") and Column B ("Practice Group") from 'Tuuthfairy Groups'.
-    Skips the header row (row 1).
-    Returns a set of group names from rows where Status == "Run".
-    """
     import gspread
     from google.oauth2.service_account import Credentials
 
@@ -52,14 +48,13 @@ def load_practice_groups_from_sheet(
     worksheet = spreadsheet.worksheet(practice_list_tab)
 
     # Grab column A (Status) and column B (Practice Group)
-    status_col = worksheet.col_values(1)  # A
-    groups_col = worksheet.col_values(2)  # B
+    status_col = worksheet.col_values(1)
+    groups_col = worksheet.col_values(2)
 
     valid_practice_groups = []
     min_len = min(len(status_col), len(groups_col))
 
-    # Skip header row (index 0)
-    for i in range(1, min_len):
+    for i in range(1, min_len):  # skip header row 0
         status_value = status_col[i].strip()
         group_name = groups_col[i].strip()
         if status_value.lower() == "run":
@@ -96,29 +91,28 @@ def main():
     config = load_config("config.json")
 
     SERVICE_ACCOUNT_FILE = config["service_account_file"]
-    SHEET_NAME = config["sheet_name"]          # The name of the Google Spreadsheet
+    SHEET_NAME = config["sheet_name"]
     AUTH0_EMAIL = config["auth0_email"]
     AUTH0_PASSWORD = config["auth0_password"]
-    
     redash_url = config["redash_url"]
     api_key = config["redash_api_key"]
 
-    # Websites we want to exclude, if any
+    # Websites we want to exclude
     excluded_domains = {"unumdentalpwp.skygenusasystems.com"}
 
-    # Load practice groups from 'Tuuthfairy Groups' sheet, but only for rows marked "Run"
+    # Load practice groups from Google Sheet
     valid_practice_groups = load_practice_groups_from_sheet(
-        SERVICE_ACCOUNT_FILE, 
-        SHEET_NAME, 
+        SERVICE_ACCOUNT_FILE,
+        SHEET_NAME,
         practice_list_tab="Tuuthfairy Groups"
     )
     logger.info("Fetched practice groups: %s", valid_practice_groups)
 
-    # Fetch Redash CSV, build location -> practice group map
+    # Fetch Redash CSV
     redash_rows = fetch_redash_csv(redash_url, api_key=api_key)
     location_map = build_location_map(redash_rows)
 
-    # Configure Chrome in headless mode
+    # Headless Chrome Setup
     options = Options()
     options.add_argument("--headless=new")  # For Chrome 109+
     options.add_argument(
@@ -131,9 +125,11 @@ def main():
     driver = webdriver.Chrome(options=options)
 
     try:
-        # Login and navigate
+        # Login
         ensure_logged_in(driver, AUTH0_EMAIL, AUTH0_PASSWORD)
-        click_connections_link(driver)
+
+        # Instead of clicking a sidebar link, go directly to /connection
+        go_directly_to_connections(driver)
 
         # Scrape data
         all_data = scrape_connections_table(driver)
@@ -153,28 +149,29 @@ def main():
                 redash_info = location_map.get(loc_id, None)
                 expanded_data.append(_combine(record, loc_id, redash_info))
 
-        # 1) Filter by practice group
+        # 1) Filter by practice groups
         filtered_data = filter_by_practice_groups(expanded_data, valid_practice_groups)
 
-        # 2) Filter by Status == 'auth_failed'
+        # 2) Filter by 'auth_failed'
         auth_failed_data = filter_auth_failed(filtered_data)
 
-        # 3) Exclude any unwanted websites
+        # 3) Exclude websites (domain-level)
         final_filtered_data = exclude_websites(auth_failed_data, excluded_domains)
 
-        # 4) Group multiple locationIds into a single row for each ID
+        # 4) Merge multiple locationIds per connection
         regrouped_data = regroup_and_merge_locations(final_filtered_data)
 
-        # (B) Local Historical Log
+        # B) Save to local CSV for historical logging
         append_run_data(regrouped_data)
 
-        # (A) Overwrite Google Sheets
-        worksheet = setup_google_sheets_client(SERVICE_ACCOUNT_FILE, SHEET_NAME, worksheet_name="auth_failed")
+        # A) Overwrite Google Sheets
+        worksheet = setup_google_sheets_client(SERVICE_ACCOUNT_FILE, SHEET_NAME, "auth_failed")
         upload_data_to_google_sheets(worksheet, regrouped_data)
 
         logger.info("Done!")
     except Exception:
-        # Save screenshot & page source for debugging
+        # If something breaks, save screenshot & HTML
+        import traceback
         screenshot_path = os.path.join(os.getcwd(), "headless_timeout.png")
         driver.save_screenshot(screenshot_path)
         logger.info("Saved screenshot to %s", screenshot_path)

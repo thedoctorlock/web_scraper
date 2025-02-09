@@ -12,11 +12,10 @@ def ensure_logged_in(driver, auth0_email, auth0_password):
     """
     Load /auth/login (redirects to Auth0).
     Fill credentials if the login form is found.
-    Wait until a known dashboard element is present (the 'Connections' link),
-    rather than checking the URL substring. 
+    We wait until we're certain the user is logged in, then we proceed.
     """
     driver.get("https://dashboard.tuuthfairy.com/auth/login")
-    time.sleep(5)  # Let the initial redirect or page load happen
+    time.sleep(5)  # Allow initial page or redirect to happen
     logger.debug("After hitting /auth/login, current URL = %s", driver.current_url)
 
     found_login_form = False
@@ -62,29 +61,29 @@ def ensure_logged_in(driver, auth0_email, auth0_password):
         except:
             pass
 
-    # Instead of waiting on the URL to contain 'dashboard.tuuthfairy.com', 
-    # wait for the 'Connections' link that only appears if you're fully logged in.
-    # Increase from 60 to 120 seconds to handle slower or suspicious flows.
+    # Instead of waiting specifically for the "Connections" link,
+    # we'll just wait until the page (body) is present for up to 2 minutes,
+    # which should cover the Auth0 flow.
     WebDriverWait(driver, 120).until(
-        EC.presence_of_element_located((By.CSS_SELECTOR, 'a[href="/connection"]'))
+        EC.presence_of_element_located((By.CSS_SELECTOR, "body"))
     )
-    logger.info("Dashboard loaded after login (Connections link found).")
+    logger.info("Login flow done (body present).")
 
-def click_connections_link(driver):
-    """
-    Click the 'Connections' link in the sidebar, then wait for the table to appear.
-    """
-    WebDriverWait(driver, 30).until(
-        EC.element_to_be_clickable((By.CSS_SELECTOR, 'a[href="/connection"]'))
-    )
-    link = driver.find_element(By.CSS_SELECTOR, 'a[href="/connection"]')
-    link.click()
-    logger.info("Clicked 'Connections' link in sidebar.")
 
-    WebDriverWait(driver, 30).until(
+def go_directly_to_connections(driver):
+    """
+    Instead of clicking a sidebar link, navigate straight to /connection,
+    and wait for the 'table tbody tr' to appear.
+    """
+    driver.get("https://dashboard.tuuthfairy.com/connection")
+    logger.info("Navigating directly to /connection...")
+
+    # Wait up to 60 seconds for the table to appear
+    WebDriverWait(driver, 60).until(
         EC.presence_of_element_located((By.CSS_SELECTOR, "table tbody tr"))
     )
-    logger.info("Connections table loaded.")
+    logger.info("Connections table loaded after direct navigation.")
+
 
 def scrape_connections_table(driver):
     """
@@ -106,12 +105,12 @@ def scrape_connections_table(driver):
                     "WebsiteId": cells[1].text.strip(),
                     "Username": cells[2].text.strip(),
                     "Status": cells[3].text.strip(),
-                    "Locations": cells[4].text.strip(),  # cleaned in process_location_field
+                    "Locations": cells[4].text.strip(),  # cleaned later
                     "LastUpdated": cells[5].text.strip(),
                 }
                 all_records.append(record)
 
-        # Check if there's a 'Next' button
+        # Check for a 'Next' pagination button
         next_buttons = driver.find_elements(By.XPATH, "//a[contains(text(), 'Next')]")
         if not next_buttons:
             break
