@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import sys
 import time
 from datetime import datetime
 import shutil  # ADDED for environment checks
@@ -157,6 +158,7 @@ def run_scraper_once(config):
     options.add_argument("--disable-gpu")  # often recommended for headless
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--disable-blink-features=AutomationControlled")
+    options.binary_location = '/snap/bin/chromium'
 
     # Optional user-agent + hide automation banners
     options.add_argument(
@@ -167,9 +169,31 @@ def run_scraper_once(config):
     options.add_experimental_option("excludeSwitches", ["enable-logging", "enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
 
+    if sys.platform.startswith("darwin"):
+        # === macOS ===
+        # 1) ChromeDriver location (likely installed via Homebrew)
+        chromedriver_path = "/usr/local/bin/chromedriver"
+
+        # 2) Google Chrome binary location
+        # If you definitely have Chrome installed here:
+        options.binary_location = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+    elif sys.platform.startswith("linux"):
+        # === Linux droplet ===
+        # 1) ChromeDriver location
+        chromedriver_path = "/usr/bin/chromedriver"
+
+        # 2) Chromium browser binary installed from snap
+        options.binary_location = "/snap/bin/chromium"
+
+    else:
+        # Windows or something else...
+        # fill in as appropriate, or just raise an error
+        raise RuntimeError("Unsupported platform for this script.")
+
     # Set up the ChromeDriver service
     service = Service(
-        executable_path="/usr/bin/chromedriver",
+        executable_path=chromedriver_path,
         service_args=["--verbose"],  # produce verbose chromedriver.log
         log_path="/tmp/chromedriver.log"
     )
