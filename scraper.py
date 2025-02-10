@@ -3,72 +3,132 @@
 import time
 import logging
 import os
+
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 
 logger = logging.getLogger(__name__)
 
-# If you do want to store screenshots from here, do:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-def ensure_logged_in(driver, auth0_email, auth0_password):
+def ensure_logged_in(driver, auth0_email, auth0_password, max_retries=2):
     """
-    Load /auth/login (redirects to Auth0).
-    Fill credentials if the login form is found, then wait for body to confirm we're in.
+    Attempt to log into the Tuuthfairy dashboard via Auth0.
+    We do step-by-step waits for intermediate redirects and
+    retry the entire login flow if we encounter timeouts.
+
+    :param driver: The Selenium WebDriver instance.
+    :param auth0_email: Auth0 login email.
+    :param auth0_password: Auth0 login password.
+    :param max_retries: How many times to retry if timeouts occur.
     """
-    driver.get("https://dashboard.tuuthfairy.com/auth/login")
-    time.sleep(5)
-    logger.debug("After hitting /auth/login, current URL = %s", driver.current_url)
+    login_url = "https://dashboard.tuuthfairy.com/auth/login"
 
-    found_login_form = False
+    for attempt in range(max_retries):
+        logger.info("ensure_logged_in: Attempt %d of %d", attempt+1, max_retries)
 
-    try:
-        # Try to find fields directly in main page
-        WebDriverWait(driver, 5).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "input#username"))
-        )
-        logger.info("Found input#username on main page (no iframe).")
-        found_login_form = True
-    except:
-        logger.info("No direct #username found; maybe there's an iframe... ")
+        # Start fresh each time we retry:
+        driver.get(login_url)
+        time.sleep(2)  # small pause for the initial page load
+
+        found_login_form = False
+
         try:
-            WebDriverWait(driver, 5).until(
-                EC.frame_to_be_available_and_switch_to_it((By.CSS_SELECTOR, "iframe"))
+            ###############################
+            # A) DETECT THE LOGIN FORM
+            ###############################
+            try:
+                # Try main page first
+                WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "input#username"))
+                )
+                logger.info("Found input#username on main page (no iframe).")
+                found_login_form = True
+            except TimeoutException:
+                logger.info("No direct #username found on main page; checking for iframe...")
+                try:
+                    WebDriverWait(driver, 5).until(
+                        EC.frame_to_be_available_and_switch_to_it((By.CSS_SELECTOR, "iframe"))
+                    )
+                    WebDriverWait(driver, 5).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "input#username"))
+                    )
+                    logger.info("Found #username in iframe.")
+                    found_login_form = True
+                except TimeoutException:
+                    logger.info("No #username found at all—could be already logged in or slow load.")
+                    # If we never found the form, let's move on; possibly we’re already logged in.
+
+            if found_login_form:
+                email_input = driver.find_element(By.CSS_SELECTOR, "input#username")
+                email_input.clear()
+                email_input.send_keys(auth0_email)
+
+                password_input = driver.find_element(By.CSS_SELECTOR, "input#password")
+                password_input.clear()
+                password_input.send_keys(auth0_password)
+
+                login_btn = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
+                login_btn.click()
+
+                # If we switched to an iframe, revert to main content
+                try:
+                    driver.switch_to.default_content()
+                except:
+                    pass
+
+            ###############################
+            # B) WAIT FOR AUTH0 REDIRECT
+            ###############################
+            # If your Auth0 flow actually redirects to "something.auth0.com",
+            # we can explicitly wait to see that domain. This step is optional
+            # and depends on your exact Auth0 tenant domain.
+
+            def on_auth0_domain(d):
+                return "auth0" in d.current_url.lower()
+
+            try:
+                WebDriverWait(driver, 30).until(on_auth0_domain)
+                logger.info("Detected Auth0 domain in URL: %s", driver.current_url)
+            except TimeoutException:
+                logger.info("Never saw an auth0.com domain—maybe the redirect was fast or not needed.")
+
+            ###############################
+            # C) WAIT FOR FINAL REDIRECT BACK TO TUUTHFAIRY
+            ###############################
+            def on_tuuthfairy_domain(d):
+                return "dashboard.tuuthfairy.com" in d.current_url.lower()
+
+            WebDriverWait(driver, 60).until(on_tuuthfairy_domain)
+            logger.info("Back on Tuuthfairy domain. Current URL: %s", driver.current_url)
+
+            # Optionally wait for a post-login element: e.g., "Connections" link or a nav bar
+            # that indicates the user is truly logged in:
+            WebDriverWait(driver, 60).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "nav a[href*='connection']"))
             )
-            WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "input#username"))
-            )
-            logger.info("Found #username in iframe.")
-            found_login_form = True
-        except:
-            logger.info("No #username found at all, possibly already logged in.")
-            pass
+            logger.info("Found 'Connections' link. Login flow appears complete.")
+            return  # success, so exit the function
 
-    if found_login_form:
-        email_input = driver.find_element(By.CSS_SELECTOR, "input#username")
-        email_input.clear()
-        email_input.send_keys(auth0_email)
+        except TimeoutException:
+            # If we hit any TimeoutException, let's log it, possibly do a screenshot, then retry
+            logger.warning("Timeout while logging in (attempt %d/%d). Retrying...", attempt+1, max_retries)
 
-        password_input = driver.find_element(By.CSS_SELECTOR, "input#password")
-        password_input.clear()
-        password_input.send_keys(auth0_password)
+            # Optionally save a screenshot for debug
+            screenshot_path = os.path.join(BASE_DIR, f"login_error_attempt_{attempt+1}.png")
+            driver.save_screenshot(screenshot_path)
+            logger.info("Saved screenshot to %s", screenshot_path)
 
-        login_btn = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
-        login_btn.click()
+            # Optionally we can do a quick page_source dump:
+            html_path = os.path.join(BASE_DIR, f"login_error_attempt_{attempt+1}.html")
+            with open(html_path, "w", encoding="utf-8") as f:
+                f.write(driver.page_source)
+            logger.info("Saved HTML page source to %s", html_path)
 
-        # If we switched to an iframe, switch back
-        try:
-            driver.switch_to.default_content()
-        except:
-            pass
-
-    # Wait for the body to appear, giving up to 120s for Auth0 flow
-    WebDriverWait(driver, 120).until(
-        EC.presence_of_element_located((By.CSS_SELECTOR, "body"))
-    )
-    logger.info("Login flow done (body present).")
-
+    # If we exhaust retries and still haven't returned, raise an exception
+    raise TimeoutException("Failed to log in after multiple attempts.")
 
 def go_directly_to_connections(driver):
     """
@@ -82,7 +142,6 @@ def go_directly_to_connections(driver):
     )
     logger.info("Connections table loaded after direct navigation.")
 
-
 def scrape_connections_table(driver):
     """
     Scrape the entire Connections table across all pages, returning list of dicts.
@@ -95,7 +154,6 @@ def scrape_connections_table(driver):
         )
         rows = driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
 
-        # The site might be using 5 rows per page, or 100, etc.
         for row in rows:
             cells = row.find_elements(By.TAG_NAME, "td")
             if len(cells) >= 6:

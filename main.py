@@ -124,24 +124,27 @@ def main():
 
     # Configure headless Chrome
     options = Options()
-    options.add_argument("--headless=new")
+    options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--disable-blink-features=AutomationControlled")
 
     # Optional user-agent + hide automation banners
     options.add_argument(
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.5481.77 Safari/537.36"
     )
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    # Add the experimental options to reduce automation signals and logging
+    options.add_experimental_option("excludeSwitches", ["enable-logging", "enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
 
     driver = webdriver.Chrome(options=options)
 
     try:
-        # 1) Login via Auth0
-        ensure_logged_in(driver, AUTH0_EMAIL, AUTH0_PASSWORD)
+        # 1) Login via Auth0 with step-by-step waits and 2 retries if needed
+        ensure_logged_in(driver, AUTH0_EMAIL, AUTH0_PASSWORD, max_retries=2)
 
         # 2) Go directly to /connection
         go_directly_to_connections(driver)
@@ -150,6 +153,7 @@ def main():
         all_data = scrape_connections_table(driver)
 
         # 4) Process location fields
+        from location_helpers import process_location_field
         for record in all_data:
             cleaned_locations = process_location_field(record["Locations"])
             record["Locations"] = cleaned_locations
@@ -165,15 +169,23 @@ def main():
                 expanded_data.append(_combine(record, loc_id, redash_info))
 
         # 5) Filter and regroup
+        from data_filter import (
+            filter_by_practice_groups,
+            filter_auth_failed,
+            exclude_websites,
+            regroup_and_merge_locations,
+        )
         filtered_data = filter_by_practice_groups(expanded_data, valid_practice_groups)
         auth_failed_data = filter_auth_failed(filtered_data)
         final_filtered_data = exclude_websites(auth_failed_data, excluded_domains)
         regrouped_data = regroup_and_merge_locations(final_filtered_data)
 
         # 6) Save a local CSV
+        from local_history import append_run_data
         append_run_data(regrouped_data)
 
         # 7) Overwrite Google Sheets
+        from google_sheets import setup_google_sheets_client, upload_data_to_google_sheets
         worksheet = setup_google_sheets_client(SERVICE_ACCOUNT_FILE, SHEET_NAME, "auth_failed")
         upload_data_to_google_sheets(worksheet, regrouped_data)
 
