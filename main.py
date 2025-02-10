@@ -2,8 +2,9 @@
 import json
 import logging
 import os
-import time  # <--- new import for sleep
+import time
 from datetime import datetime
+import shutil  # ADDED for environment checks
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -43,6 +44,27 @@ logger = logging.getLogger(__name__)
 def load_config(path=CONFIG_PATH):
     with open(path, "r") as f:
         return json.load(f)
+
+def check_cron_environment():
+    """
+    Warn if essential binaries are missing from PATH, which can happen in a minimal
+    cron environment. Also log the current PATH so you can confirm it includes
+    /usr/bin, /bin, or other directories needed by Chrome/ChromeDriver.
+    """
+    logger.info("Checking environment variables for cron usage...")
+    # These utilities are typically used by Chrome startup scripts
+    # If they're missing, Chrome might fail in a cron environment.
+    essential_cmds = ["readlink", "dirname"]
+    for cmd in essential_cmds:
+        if shutil.which(cmd) is None:
+            logger.warning(
+                "Command '%s' not found in PATH. If running from cron, "
+                "ensure /usr/bin (etc.) is in PATH to prevent Chrome startup issues.",
+                cmd
+            )
+
+    path_env = os.getenv("PATH", "")
+    logger.info("Current PATH environment variable: %s", path_env)
 
 def load_practice_groups_from_sheet(
     service_account_file,
@@ -99,8 +121,7 @@ def _combine(scraped_record, loc_id, redash_info):
 
 def run_scraper_once(config):
     """
-    Run the scraper steps exactly once. 
-    This function is called within the retry loop in main().
+    Run the scraper steps exactly once.
     Raises exceptions on any failure so that main() can catch them.
     """
     logger.info("Starting single scraper run...")
@@ -127,12 +148,13 @@ def run_scraper_once(config):
     redash_rows = fetch_redash_csv(redash_url, api_key=api_key)
     location_map = build_location_map(redash_rows)
 
-    # Configure headless Chrome
+    # Configure headless Chrome with recommended flags for cron
     options = Options()
-    options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
+    # Headless + no sandbox + disable dev shm usage for memory-limited or minimal env
+    options.add_argument("--headless")  # run without GUI
+    options.add_argument("--no-sandbox")  # needed in certain cron/CI environments
+    options.add_argument("--disable-dev-shm-usage")  # avoid /dev/shm crashes
+    options.add_argument("--disable-gpu")  # often recommended for headless
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--disable-blink-features=AutomationControlled")
 
@@ -141,14 +163,14 @@ def run_scraper_once(config):
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.5481.77 Safari/537.36"
     )
-    # Add the experimental options to reduce automation signals and logging
+    # Reduce noisy logs and automation flags
     options.add_experimental_option("excludeSwitches", ["enable-logging", "enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
 
     # Set up the ChromeDriver service
     service = Service(
         executable_path="/usr/local/bin/chromedriver",  # Adjust if needed
-        service_args=["--verbose"],
+        service_args=["--verbose"],  # produce verbose chromedriver.log
         log_path="/tmp/chromedriver.log"
     )
 
@@ -193,11 +215,14 @@ def run_scraper_once(config):
 
         logger.info("Single scraper run completed successfully!")
     finally:
-        # Always quit the driver to free resources
+        # Always quit the driver to free resources, preventing zombies
         driver.quit()
 
 def main():
     logger.info("Launching script with retry mechanism...")
+
+    # Check environment up front (especially helpful under cron)
+    check_cron_environment()
 
     # Load config from absolute path
     config = load_config(CONFIG_PATH)

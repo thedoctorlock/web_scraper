@@ -7,7 +7,11 @@ import os
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.common.exceptions import (
+    TimeoutException,
+    WebDriverException,
+    StaleElementReferenceException,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -19,15 +23,16 @@ def ensure_logged_in(driver, auth0_email, auth0_password, max_retries=2):
     We do step-by-step waits for intermediate redirects and
     retry the entire login flow if we encounter timeouts.
 
-    :param driver: The Selenium WebDriver instance.
-    :param auth0_email: Auth0 login email.
-    :param auth0_password: Auth0 login password.
-    :param max_retries: How many times to retry if timeouts occur.
+    NOTE FOR CRON/CI USAGE:
+    - Make sure PATH includes /usr/bin, /bin, etc. so that Google Chrome
+      can locate system utilities it needs. If missing, login may fail.
+    - If you see 'Chrome failed to start: exited abnormally', you may need
+      --no-sandbox, --disable-dev-shm-usage, or an updated PATH in the crontab.
     """
     login_url = "https://dashboard.tuuthfairy.com/auth/login"
 
     for attempt in range(max_retries):
-        logger.info("ensure_logged_in: Attempt %d of %d", attempt+1, max_retries)
+        logger.info("ensure_logged_in: Attempt %d of %d", attempt + 1, max_retries)
 
         # Start fresh each time we retry:
         driver.get(login_url)
@@ -36,9 +41,7 @@ def ensure_logged_in(driver, auth0_email, auth0_password, max_retries=2):
         found_login_form = False
 
         try:
-            ###############################
             # A) DETECT THE LOGIN FORM
-            ###############################
             try:
                 # Try main page first
                 WebDriverWait(driver, 5).until(
@@ -59,7 +62,6 @@ def ensure_logged_in(driver, auth0_email, auth0_password, max_retries=2):
                     found_login_form = True
                 except TimeoutException:
                     logger.info("No #username found at all—could be already logged in or slow load.")
-                    # If we never found the form, let's move on; possibly we’re already logged in.
 
             if found_login_form:
                 email_input = driver.find_element(By.CSS_SELECTOR, "input#username")
@@ -79,13 +81,7 @@ def ensure_logged_in(driver, auth0_email, auth0_password, max_retries=2):
                 except:
                     pass
 
-            ###############################
             # B) WAIT FOR AUTH0 REDIRECT
-            ###############################
-            # If your Auth0 flow actually redirects to "something.auth0.com",
-            # we can explicitly wait to see that domain. This step is optional
-            # and depends on your exact Auth0 tenant domain.
-
             def on_auth0_domain(d):
                 return "auth0" in d.current_url.lower()
 
@@ -93,35 +89,29 @@ def ensure_logged_in(driver, auth0_email, auth0_password, max_retries=2):
                 WebDriverWait(driver, 30).until(on_auth0_domain)
                 logger.info("Detected Auth0 domain in URL: %s", driver.current_url)
             except TimeoutException:
-                logger.info("Never saw an auth0.com domain—maybe the redirect was fast or not needed.")
+                logger.info("Never saw an auth0.com domain—maybe the redirect was very quick or not needed.")
 
-            ###############################
             # C) WAIT FOR FINAL REDIRECT BACK TO TUUTHFAIRY
-            ###############################
             def on_tuuthfairy_domain(d):
                 return "dashboard.tuuthfairy.com" in d.current_url.lower()
 
             WebDriverWait(driver, 60).until(on_tuuthfairy_domain)
             logger.info("Back on Tuuthfairy domain. Current URL: %s", driver.current_url)
 
-            # Optionally wait for a post-login element: e.g., "Connections" link or a nav bar
-            # that indicates the user is truly logged in:
+            # Wait for the "Connections" link or a nav bar element to confirm login
             WebDriverWait(driver, 60).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "nav a[href*='connection']"))
             )
             logger.info("Found 'Connections' link. Login flow appears complete.")
-            return  # success, so exit the function
-
+            return  # success
         except TimeoutException:
-            # If we hit any TimeoutException, let's log it, possibly do a screenshot, then retry
-            logger.warning("Timeout while logging in (attempt %d/%d). Retrying...", attempt+1, max_retries)
+            # If we hit a TimeoutException, let's log it, possibly do a screenshot, then retry
+            logger.warning("Timeout while logging in (attempt %d/%d). Retrying...", attempt + 1, max_retries)
 
-            # Optionally save a screenshot for debug
             screenshot_path = os.path.join(BASE_DIR, f"login_error_attempt_{attempt+1}.png")
             driver.save_screenshot(screenshot_path)
             logger.info("Saved screenshot to %s", screenshot_path)
 
-            # Optionally we can do a quick page_source dump:
             html_path = os.path.join(BASE_DIR, f"login_error_attempt_{attempt+1}.html")
             with open(html_path, "w", encoding="utf-8") as f:
                 f.write(driver.page_source)
@@ -144,38 +134,105 @@ def go_directly_to_connections(driver):
 
 def scrape_connections_table(driver):
     """
-    Scrape the entire Connections table across all pages, returning list of dicts.
+    Scrape the entire Connections table across all pages, returning a list of dicts.
+
+    We use a robust row-by-row approach to re-locate elements if they go stale.
     """
     all_records = []
 
     while True:
+        # Wait for table rows to appear
         WebDriverWait(driver, 30).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "table tbody tr"))
         )
-        rows = driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
 
-        for row in rows:
-            cells = row.find_elements(By.TAG_NAME, "td")
-            if len(cells) >= 6:
-                record = {
-                    "ID": cells[0].text.strip(),
-                    "WebsiteId": cells[1].text.strip(),
-                    "Username": cells[2].text.strip(),
-                    "Status": cells[3].text.strip(),
-                    "Locations": cells[4].text.strip(),  # We'll parse these later
-                    "LastUpdated": cells[5].text.strip(),
-                }
+        # 1) Get the total number of rows in the table
+        rows = driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
+        num_rows = len(rows)
+        logger.debug("Found %d rows on this page", num_rows)
+
+        # 2) Iterate by index so we can re-locate each row as needed
+        for row_index in range(num_rows):
+            record = _scrape_row_with_retry(driver, row_index)
+            if record is not None:
                 all_records.append(record)
 
-        # If there's a "Next" pagination button, click it; otherwise break
+        # 3) Check for "Next" pagination button and click if present
         next_buttons = driver.find_elements(By.XPATH, "//a[contains(text(), 'Next')]")
         if not next_buttons:
             break
         next_buttons[0].click()
+
+        # small buffer after pagination click so page can re-render
         time.sleep(2)
 
     logger.info("Scraped %d records from connections table.", len(all_records))
     return all_records
+
+def _scrape_row_with_retry(driver, row_index, max_retries=3):
+    """
+    Locate the row at row_index, find its <td> cells, and extract text.
+    If we hit a StaleElementReferenceException, we re-locate the row and try again.
+
+    Returns a dict or None if we fail.
+    """
+    attempts = 0
+    while attempts < max_retries:
+        try:
+            # Re-locate the row at this index
+            rows_current = driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
+            if row_index >= len(rows_current):
+                logger.warning(
+                    "Row index %d is out of range after re-locating rows. Skipping row.",
+                    row_index
+                )
+                return None
+
+            row = rows_current[row_index]
+            cells = row.find_elements(By.TAG_NAME, "td")
+
+            # We expect at least 6 cells: ID, WebsiteId, Username, Status, Locations, LastUpdated
+            if len(cells) < 6:
+                logger.warning(
+                    "Row %d has only %d cells, expected >= 6. Skipping this row.",
+                    row_index, len(cells)
+                )
+                return None
+
+            # Extract text immediately
+            id_text = cells[0].text.strip()
+            website_text = cells[1].text.strip()
+            username_text = cells[2].text.strip()
+            status_text = cells[3].text.strip()
+            locations_text = cells[4].text.strip()
+            last_updated_text = cells[5].text.strip()
+
+            record = {
+                "ID": id_text,
+                "WebsiteId": website_text,
+                "Username": username_text,
+                "Status": status_text,
+                "Locations": locations_text,
+                "LastUpdated": last_updated_text,
+            }
+            return record
+
+        except StaleElementReferenceException:
+            logger.warning(
+                "Stale element on row %d attempt %d/%d. Re-locating row and retrying.",
+                row_index, attempts + 1, max_retries
+            )
+            time.sleep(1)
+            attempts += 1
+        except WebDriverException as e:
+            logger.warning("WebDriverException on row %d: %s", row_index, e)
+            return None
+
+    logger.warning(
+        "Row %d: max retries (%d) hit for stale elements. Skipping this row.",
+        row_index, max_retries
+    )
+    return None
 
 def save_debug_screenshot_and_html(driver):
     """
