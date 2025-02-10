@@ -7,7 +7,11 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-HISTORY_FILE = "auth_failed_history.csv"
+# Define a base directory for local_history.py
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Construct an absolute path for the CSV
+HISTORY_FILE = os.path.join(BASE_DIR, "auth_failed_history.csv")
 
 def append_run_data(data, filepath=HISTORY_FILE):
     """

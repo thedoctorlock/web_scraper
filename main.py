@@ -1,37 +1,50 @@
-# main.py
-
+#!/usr/bin/env python3
 import json
 import logging
-from datetime import datetime
 import os
+from datetime import datetime
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 
-# We've replaced click_connections_link with go_directly_to_connections
-from scraper import ensure_logged_in, go_directly_to_connections, scrape_connections_table
+# Scraper pieces
+from scraper import (
+    ensure_logged_in,
+    go_directly_to_connections,
+    scrape_connections_table,
+)
 from redash_data import fetch_redash_csv, build_location_map
 from data_filter import (
     filter_by_practice_groups,
     filter_auth_failed,
     exclude_websites,
-    regroup_and_merge_locations
+    regroup_and_merge_locations,
 )
 from google_sheets import setup_google_sheets_client, upload_data_to_google_sheets
 from location_helpers import process_location_field
-from local_history import append_run_data  # logs final data locally
+from local_history import append_run_data
 
-# Configure logging
+###################################################
+# Use absolute paths for files/logs
+###################################################
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LOG_FILE = os.path.join(BASE_DIR, "tuuthfairy_scraper.log")
+CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+
 logging.basicConfig(
-    filename="tuuthfairy_scraper.log",
+    filename=LOG_FILE,
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s"
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
+def load_config(path=CONFIG_PATH):
+    with open(path, "r") as f:
+        return json.load(f)
+
 def load_practice_groups_from_sheet(
-    service_account_file, 
-    spreadsheet_name, 
+    service_account_file,
+    spreadsheet_name,
     practice_list_tab="Tuuthfairy Groups"
 ):
     import gspread
@@ -53,18 +66,14 @@ def load_practice_groups_from_sheet(
 
     valid_practice_groups = []
     min_len = min(len(status_col), len(groups_col))
-
-    for i in range(1, min_len):  # skip header row 0
+    # skip header row 0
+    for i in range(1, min_len):
         status_value = status_col[i].strip()
         group_name = groups_col[i].strip()
         if status_value.lower() == "run":
             valid_practice_groups.append(group_name)
 
     return set(valid_practice_groups)
-
-def load_config(config_path="config.json"):
-    with open(config_path, "r") as f:
-        return json.load(f)
 
 def _combine(scraped_record, loc_id, redash_info):
     """
@@ -88,8 +97,9 @@ def _combine(scraped_record, loc_id, redash_info):
 
 def main():
     logger.info("Launching script...")
-    config = load_config("config.json")
 
+    # Load config from absolute path
+    config = load_config(CONFIG_PATH)
     SERVICE_ACCOUNT_FILE = config["service_account_file"]
     SHEET_NAME = config["sheet_name"]
     AUTH0_EMAIL = config["auth0_email"]
@@ -97,24 +107,29 @@ def main():
     redash_url = config["redash_url"]
     api_key = config["redash_api_key"]
 
-    # Websites we want to exclude
+    # Example: exclude certain domains
     excluded_domains = {"unumdentalpwp.skygenusasystems.com"}
 
     # Load practice groups from Google Sheet
     valid_practice_groups = load_practice_groups_from_sheet(
         SERVICE_ACCOUNT_FILE,
         SHEET_NAME,
-        practice_list_tab="Tuuthfairy Groups"
+        practice_list_tab="Tuuthfairy Groups",
     )
     logger.info("Fetched practice groups: %s", valid_practice_groups)
 
-    # Fetch Redash CSV
+    # Fetch & build location map from Redash
     redash_rows = fetch_redash_csv(redash_url, api_key=api_key)
     location_map = build_location_map(redash_rows)
 
-    # Headless Chrome Setup
+    # Configure headless Chrome
     options = Options()
-    options.add_argument("--headless=new")  # For Chrome 109+
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+
+    # Optional user-agent + hide automation banners
     options.add_argument(
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.5481.77 Safari/537.36"
@@ -125,16 +140,16 @@ def main():
     driver = webdriver.Chrome(options=options)
 
     try:
-        # Login
+        # 1) Login via Auth0
         ensure_logged_in(driver, AUTH0_EMAIL, AUTH0_PASSWORD)
 
-        # Instead of clicking a sidebar link, go directly to /connection
+        # 2) Go directly to /connection
         go_directly_to_connections(driver)
 
-        # Scrape data
+        # 3) Scrape all rows
         all_data = scrape_connections_table(driver)
 
-        # Clean location fields
+        # 4) Process location fields
         for record in all_data:
             cleaned_locations = process_location_field(record["Locations"])
             record["Locations"] = cleaned_locations
@@ -149,34 +164,28 @@ def main():
                 redash_info = location_map.get(loc_id, None)
                 expanded_data.append(_combine(record, loc_id, redash_info))
 
-        # 1) Filter by practice groups
+        # 5) Filter and regroup
         filtered_data = filter_by_practice_groups(expanded_data, valid_practice_groups)
-
-        # 2) Filter by 'auth_failed'
         auth_failed_data = filter_auth_failed(filtered_data)
-
-        # 3) Exclude websites (domain-level)
         final_filtered_data = exclude_websites(auth_failed_data, excluded_domains)
-
-        # 4) Merge multiple locationIds per connection
         regrouped_data = regroup_and_merge_locations(final_filtered_data)
 
-        # B) Save to local CSV for historical logging
+        # 6) Save a local CSV
         append_run_data(regrouped_data)
 
-        # A) Overwrite Google Sheets
+        # 7) Overwrite Google Sheets
         worksheet = setup_google_sheets_client(SERVICE_ACCOUNT_FILE, SHEET_NAME, "auth_failed")
         upload_data_to_google_sheets(worksheet, regrouped_data)
 
         logger.info("Done!")
     except Exception:
-        # If something breaks, save screenshot & HTML
         import traceback
-        screenshot_path = os.path.join(os.getcwd(), "headless_timeout.png")
+        # If something breaks, store screenshot & HTML in the same folder as main.py
+        screenshot_path = os.path.join(BASE_DIR, "headless_timeout.png")
         driver.save_screenshot(screenshot_path)
         logger.info("Saved screenshot to %s", screenshot_path)
 
-        html_path = os.path.join(os.getcwd(), "headless_timeout.html")
+        html_path = os.path.join(BASE_DIR, "headless_timeout.html")
         with open(html_path, "w", encoding="utf-8") as f:
             f.write(driver.page_source)
         logger.info("Saved page source to %s", html_path)

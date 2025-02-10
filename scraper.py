@@ -2,34 +2,36 @@
 
 import time
 import logging
+import os
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 logger = logging.getLogger(__name__)
 
+# If you do want to store screenshots from here, do:
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 def ensure_logged_in(driver, auth0_email, auth0_password):
     """
     Load /auth/login (redirects to Auth0).
-    Fill credentials if the login form is found.
-    We wait until we're certain the user is logged in, then we proceed.
+    Fill credentials if the login form is found, then wait for body to confirm we're in.
     """
     driver.get("https://dashboard.tuuthfairy.com/auth/login")
-    time.sleep(5)  # Allow initial page or redirect to happen
+    time.sleep(5)
     logger.debug("After hitting /auth/login, current URL = %s", driver.current_url)
 
     found_login_form = False
 
-    # Attempt to find login fields outside an iframe
     try:
+        # Try to find fields directly in main page
         WebDriverWait(driver, 5).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "input#username"))
         )
         logger.info("Found input#username on main page (no iframe).")
         found_login_form = True
     except:
-        logger.info("No direct #username found on main page; checking for iframe...")
-        # Attempt to switch to an iframe with login fields
+        logger.info("No direct #username found; maybe there's an iframe... ")
         try:
             WebDriverWait(driver, 5).until(
                 EC.frame_to_be_available_and_switch_to_it((By.CSS_SELECTOR, "iframe"))
@@ -40,7 +42,7 @@ def ensure_logged_in(driver, auth0_email, auth0_password):
             logger.info("Found #username in iframe.")
             found_login_form = True
         except:
-            logger.info("No #username found, possibly already logged in.")
+            logger.info("No #username found at all, possibly already logged in.")
             pass
 
     if found_login_form:
@@ -61,9 +63,7 @@ def ensure_logged_in(driver, auth0_email, auth0_password):
         except:
             pass
 
-    # Instead of waiting specifically for the "Connections" link,
-    # we'll just wait until the page (body) is present for up to 2 minutes,
-    # which should cover the Auth0 flow.
+    # Wait for the body to appear, giving up to 120s for Auth0 flow
     WebDriverWait(driver, 120).until(
         EC.presence_of_element_located((By.CSS_SELECTOR, "body"))
     )
@@ -72,13 +72,11 @@ def ensure_logged_in(driver, auth0_email, auth0_password):
 
 def go_directly_to_connections(driver):
     """
-    Instead of clicking a sidebar link, navigate straight to /connection,
-    and wait for the 'table tbody tr' to appear.
+    Navigate straight to /connection, wait for the table to appear.
     """
     driver.get("https://dashboard.tuuthfairy.com/connection")
     logger.info("Navigating directly to /connection...")
 
-    # Wait up to 60 seconds for the table to appear
     WebDriverWait(driver, 60).until(
         EC.presence_of_element_located((By.CSS_SELECTOR, "table tbody tr"))
     )
@@ -87,7 +85,7 @@ def go_directly_to_connections(driver):
 
 def scrape_connections_table(driver):
     """
-    Scrape the entire Connections table across all pages. Returns a list of dicts.
+    Scrape the entire Connections table across all pages, returning list of dicts.
     """
     all_records = []
 
@@ -97,6 +95,7 @@ def scrape_connections_table(driver):
         )
         rows = driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
 
+        # The site might be using 5 rows per page, or 100, etc.
         for row in rows:
             cells = row.find_elements(By.TAG_NAME, "td")
             if len(cells) >= 6:
@@ -105,18 +104,30 @@ def scrape_connections_table(driver):
                     "WebsiteId": cells[1].text.strip(),
                     "Username": cells[2].text.strip(),
                     "Status": cells[3].text.strip(),
-                    "Locations": cells[4].text.strip(),  # cleaned later
+                    "Locations": cells[4].text.strip(),  # We'll parse these later
                     "LastUpdated": cells[5].text.strip(),
                 }
                 all_records.append(record)
 
-        # Check for a 'Next' pagination button
+        # If there's a "Next" pagination button, click it; otherwise break
         next_buttons = driver.find_elements(By.XPATH, "//a[contains(text(), 'Next')]")
         if not next_buttons:
             break
-        else:
-            next_buttons[0].click()
-            time.sleep(2)
+        next_buttons[0].click()
+        time.sleep(2)
 
     logger.info("Scraped %d records from connections table.", len(all_records))
     return all_records
+
+def save_debug_screenshot_and_html(driver):
+    """
+    Example helper if you want a function to save debug info from scraper.py
+    """
+    screenshot_path = os.path.join(BASE_DIR, "scraper_error.png")
+    driver.save_screenshot(screenshot_path)
+    logger.info("Saved screenshot to %s", screenshot_path)
+
+    html_path = os.path.join(BASE_DIR, "scraper_error.html")
+    with open(html_path, "w", encoding="utf-8") as f:
+        f.write(driver.page_source)
+    logger.info("Saved page source to %s", html_path)
