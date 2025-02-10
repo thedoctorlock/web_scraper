@@ -169,7 +169,7 @@ def run_scraper_once(config):
 
     # Set up the ChromeDriver service
     service = Service(
-        executable_path="/usr/local/bin/chromedriver",  # Adjust if needed
+        executable_path="/usr/bin/chromedriver",
         service_args=["--verbose"],  # produce verbose chromedriver.log
         log_path="/tmp/chromedriver.log"
     )
