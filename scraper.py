@@ -121,15 +121,27 @@ def ensure_logged_in(driver, auth0_email, auth0_password, max_retries=2):
     raise TimeoutException("Failed to log in after multiple attempts.")
 
 def go_directly_to_connections(driver):
-    """
-    Navigate straight to /connection, wait for the table to appear.
-    """
     driver.get("https://dashboard.tuuthfairy.com/connection")
     logger.info("Navigating directly to /connection...")
+
+    # Debug snippet 1 (BEFORE waiting for the table) - take only if logger is set to Debug 
+    if logger.isEnabledFor(logging.DEBUG):
+        driver.save_screenshot("connection_before_wait.png")
+        logger.debug("Saved screenshot to connection_before_wait.png")
+
+    logger.debug("Page source BEFORE waiting:\n%s", driver.page_source)
 
     WebDriverWait(driver, 60).until(
         EC.presence_of_element_located((By.CSS_SELECTOR, "table tbody tr"))
     )
+
+    # Debug snippet 2 (AFTER the table is found):
+    if logger.isEnabledFor(logging.DEBUG):
+        driver.save_screenshot("connection_after_wait.png")
+        logger.debug("Saved screenshot to connection_after_wait.png")
+
+    logger.debug("Page source AFTER waiting:\n%s", driver.page_source)
+
     logger.info("Connections table loaded after direct navigation.")
 
 def scrape_connections_table(driver):
@@ -139,15 +151,48 @@ def scrape_connections_table(driver):
     We use a robust row-by-row approach to re-locate elements if they go stale.
     """
     all_records = []
-
+    page_count = 1  # Initialize the page count
+    
     while True:
-        # Wait for table rows to appear
-        WebDriverWait(driver, 30).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "table tbody tr"))
+        # Before waiting
+        if logger.isEnabledFor(logging.DEBUG):
+            driver.save_screenshot(f"scrape_before_wait_page{page_count}.png")
+            logger.debug("Saved screenshot to scrape_before_wait_page#.png")
+
+        logger.debug("Page source BEFORE wait on page %d:\n%s", page_count, driver.page_source)
+
+        # Wait for the table (empty or not)
+        WebDriverWait(driver, 60).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "table.w-full.caption-bottom.text-sm"))
         )
+
+        rows = driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
+        if not rows:
+            logger.info("Page %d is empty. Stopping scraper.", page_count)
+            break
+
+        # After waiting
+        if logger.isEnabledFor(logging.DEBUG):
+            driver.save_screenshot(f"scrape_after_wait_page{page_count}.png")
+            logger.debug("Saved screenshot to scrape_after_wait_page#.png")
+        
+        logger.debug("Page source AFTER wait on page %d:\n%s", page_count, driver.page_source)
 
         # 1) Get the total number of rows in the table
         rows = driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
+        # If rows exist but they contain no <td> cells (or only header cells), consider it blank.
+        data_found = False
+        for row in rows:
+            # Look for <td> cells
+            cells = row.find_elements(By.TAG_NAME, "td")
+            if cells and any(cell.text.strip() for cell in cells):
+                data_found = True
+                break
+
+        if not data_found:
+            logger.info("No data rows found on page %d, ending pagination.", page_count)
+            break
+
         num_rows = len(rows)
         logger.debug("Found %d rows on this page", num_rows)
 
@@ -165,6 +210,7 @@ def scrape_connections_table(driver):
 
         # small buffer after pagination click so page can re-render
         time.sleep(2)
+        page_count += 1
 
     logger.info("Scraped %d records from connections table.", len(all_records))
     return all_records
@@ -181,6 +227,14 @@ def _scrape_row_with_retry(driver, row_index, max_retries=3):
         try:
             # Re-locate the row at this index
             rows_current = driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
+            # Debug snippet
+            if logger.isEnabledFor(logging.DEBUG):
+                driver.save_screenshot(f"row_retry_{row_index}_attempt_{attempts}.png")
+                logger.debug("Saved screenshot to row_retry_#_attempt_#.png")
+            
+            logger.debug("Found %d rows. Attempt %d for row %d. Page source:\n%s",
+                        len(rows_current), attempts, row_index, driver.page_source)
+            
             if row_index >= len(rows_current):
                 logger.warning(
                     "Row index %d is out of range after re-locating rows. Skipping row.",

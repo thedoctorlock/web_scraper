@@ -18,5 +18,8 @@ __pycache__/
 # Ignore log files
 *.log
 
+# Ignore screenshots
+*.png
+
 #Ignore local history csv file
 auth_failed_history.csv

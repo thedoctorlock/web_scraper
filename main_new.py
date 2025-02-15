@@ -67,21 +67,10 @@ def check_cron_environment():
     path_env = os.getenv("PATH", "")
     logger.info("Current PATH environment variable: %s", path_env)
 
-def load_practice_groups_from_sheet(
-    service_account_file,
-    spreadsheet_name,
-    practice_list_tab="Tuuthfairy Groups"
-):
+def load_practice_groups_from_sheet(service_account_file, spreadsheet_name, practice_list_tab="Tuuthfairy Groups"):
     import gspread
-    from google.oauth2.service_account import Credentials
-
-    creds = Credentials.from_service_account_file(service_account_file)
-    scoped = creds.with_scopes([
-        "https://www.googleapis.com/auth/drive",
-        "https://www.googleapis.com/auth/spreadsheets",
-    ])
-    client = gspread.authorize(scoped)
-
+    # Use the new service_account() method:
+    client = gspread.service_account(filename=service_account_file)
     spreadsheet = client.open(spreadsheet_name)
     worksheet = spreadsheet.worksheet(practice_list_tab)
 
@@ -91,7 +80,7 @@ def load_practice_groups_from_sheet(
 
     valid_practice_groups = []
     min_len = min(len(status_col), len(groups_col))
-    # skip the header row (index 0)
+    # Skip the header row (index 0)
     for i in range(1, min_len):
         status_value = status_col[i].strip()
         group_name = groups_col[i].strip()
@@ -205,6 +194,10 @@ def run_scraper_once(config):
 
         # 2) Go directly to /connection
         go_directly_to_connections(driver)
+
+        # Immediately after navigation, take a screenshot
+        driver.save_screenshot("post_nav_screenshot.png")
+        logger.info("Saved screenshot after navigating to /connection.")
 
         # 3) Scrape all rows
         all_data = scrape_connections_table(driver)

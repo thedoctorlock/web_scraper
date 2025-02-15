@@ -8,15 +8,8 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 def setup_google_sheets_client(service_account_file, sheet_name, worksheet_name="auth_failed"):
-    """
-    Opens the specified Google Spreadsheet and returns the given worksheet (default: 'auth_failed').
-    """
-    creds = Credentials.from_service_account_file(service_account_file)
-    scoped = creds.with_scopes([
-        "https://www.googleapis.com/auth/drive",
-        "https://www.googleapis.com/auth/spreadsheets",
-    ])
-    client = gspread.authorize(scoped)
+    # Use the new service_account() method directly:
+    client = gspread.service_account(filename=service_account_file)
     spreadsheet = client.open(sheet_name)
     worksheet = spreadsheet.worksheet(worksheet_name)
     return worksheet
