@@ -10,6 +10,7 @@ import shutil  # ADDED for environment checks
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+from utils import resource_path
 
 # Scraper pieces
 from scraper import (
@@ -33,7 +34,7 @@ from local_history import append_run_data
 ###################################################
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(BASE_DIR, "tuuthfairy_scraper.log")
-CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+
 
 logging.basicConfig(
     filename=LOG_FILE,
@@ -42,8 +43,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def load_config(path=CONFIG_PATH):
-    with open(path, "r") as f:
+def load_config():
+    config_path = resource_path("config.json")  # Use the helper
+    with open(config_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 def check_cron_environment():
@@ -141,7 +143,7 @@ def run_scraper_once(config):
     # Configure headless Chrome with recommended flags for cron
     options = Options()
     # Headless + no sandbox + disable dev shm usage for memory-limited or minimal env
-    options.add_argument("--headless")  # run without GUI
+    #options.add_argument("--headless")  # run without GUI
     options.add_argument("--no-sandbox")  # needed in certain cron/CI environments
     options.add_argument("--disable-dev-shm-usage")  # avoid /dev/shm crashes
     options.add_argument("--disable-gpu")  # often recommended for headless
@@ -242,7 +244,7 @@ def main():
     check_cron_environment()
 
     # Load config from absolute path
-    config = load_config(CONFIG_PATH)
+    config = load_config()
 
     max_attempts = 3
     for attempt in range(1, max_attempts + 1):

@@ -14,14 +14,13 @@ def setup_google_sheets_client(service_account_file, sheet_name, worksheet_name=
     worksheet = spreadsheet.worksheet(worksheet_name)
     return worksheet
 
-def upload_data_to_google_sheets(worksheet, data):
+def upload_data_to_google_sheets(worksheet, data, practice_group_count=None):
     """
     Overwrites the entire worksheet with the new data.
     1) Clear the sheet.
     2) Re-insert the header in row 1.
     3) Insert all rows starting at row 2.
     """
-
     if not data:
         logger.info("No data to upload. Clearing the sheet just in case.")
         worksheet.clear()
