@@ -10,6 +10,7 @@ import shutil  # ADDED for environment checks
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+from utils import resource_path
 
 # Scraper pieces
 from scraper import (
@@ -33,7 +34,7 @@ from local_history import append_run_data
 ###################################################
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(BASE_DIR, "tuuthfairy_scraper.log")
-CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+
 
 logging.basicConfig(
     filename=LOG_FILE,
@@ -42,8 +43,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def load_config(path=CONFIG_PATH):
-    with open(path, "r") as f:
+def load_config():
+    config_path = resource_path("config.json")  # Use the helper
+    with open(config_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 def check_cron_environment():
@@ -140,11 +142,18 @@ def run_scraper_once(config):
 
     # Configure headless Chrome with recommended flags for cron
     options = Options()
-    # Headless + no sandbox + disable dev shm usage for memory-limited or minimal env
     options.add_argument("--headless")  # run without GUI
-    options.add_argument("--no-sandbox")  # needed in certain cron/CI environments
-    options.add_argument("--disable-dev-shm-usage")  # avoid /dev/shm crashes
-    options.add_argument("--disable-gpu")  # often recommended for headless
+    options.add_argument("--no-sandbox")  
+    options.add_argument("--disable-dev-shm-usage")  
+    options.add_argument("--disable-gpu")
+
+    # The extra flags:
+    options.add_argument("--disable-setuid-sandbox")
+    options.add_argument("--single-process")
+    options.add_argument("--remote-debugging-port=0")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-software-rasterizer")
+
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.binary_location = '/snap/bin/chromium'
@@ -154,36 +163,21 @@ def run_scraper_once(config):
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.5481.77 Safari/537.36"
     )
-    # Reduce noisy logs and automation flags
     options.add_experimental_option("excludeSwitches", ["enable-logging", "enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
 
     if sys.platform.startswith("darwin"):
-        # === macOS ===
-        # 1) ChromeDriver location (likely installed via Homebrew)
         chromedriver_path = "/usr/local/bin/chromedriver"
-
-        # 2) Google Chrome binary location
-        # If you definitely have Chrome installed here:
         options.binary_location = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-
     elif sys.platform.startswith("linux"):
-        # === Linux droplet ===
-        # 1) ChromeDriver location
+        options.binary_location = "/usr/bin/google-chrome"
         chromedriver_path = "/usr/bin/chromedriver"
-
-        # 2) Chromium browser binary installed from snap
-        options.binary_location = "/snap/bin/chromium"
-
     else:
-        # Windows or something else...
-        # fill in as appropriate, or just raise an error
         raise RuntimeError("Unsupported platform for this script.")
 
-    # Set up the ChromeDriver service
     service = Service(
         executable_path=chromedriver_path,
-        service_args=["--verbose"],  # produce verbose chromedriver.log
+        service_args=["--verbose"],  
         log_path="/tmp/chromedriver.log"
     )
 
@@ -228,7 +222,11 @@ def run_scraper_once(config):
 
         # 7) Overwrite Google Sheets
         worksheet = setup_google_sheets_client(SERVICE_ACCOUNT_FILE, SHEET_NAME, "auth_failed")
-        upload_data_to_google_sheets(worksheet, regrouped_data)
+        upload_data_to_google_sheets(
+            worksheet,
+            regrouped_data,
+            practice_group_count=len(valid_practice_groups)
+        )
 
         logger.info("Single scraper run completed successfully!")
     finally:
@@ -242,7 +240,7 @@ def main():
     check_cron_environment()
 
     # Load config from absolute path
-    config = load_config(CONFIG_PATH)
+    config = load_config()
 
     max_attempts = 3
     for attempt in range(1, max_attempts + 1):

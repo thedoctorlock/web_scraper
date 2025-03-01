@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import subprocess
+import tkinter as tk
+from tkinter import scrolledtext
+
+def main():
+    # Create a single Tk window
+    root = tk.Tk()
+    root.title("Web Scraper Progress")
+
+    # A scrolled text widget so we can add lines of text
+    text_area = scrolledtext.ScrolledText(root, width=80, height=20)
+    text_area.pack(padx=10, pady=10)
+
+    def log_message(msg):
+        """Helper to append text to the GUI and auto-scroll."""
+        text_area.insert(tk.END, msg + "\n")
+        text_area.see(tk.END)  # auto-scroll to bottom
+        root.update_idletasks()
+
+    log_message("Starting web scraper (headless mode). Please wait...")
+
+    # Figure out where main_new.py is, even if we're frozen by PyInstaller
+    if getattr(sys, 'frozen', False):
+        base_dir = sys._MEIPASS
+    else:
+        base_dir = os.path.abspath(os.path.dirname(__file__))
+
+    script_path = os.path.join(base_dir, "main_new.py")
+
+    # Run main_new.py in a subprocess
+    # Capture both stdout and stderr so we can display them
+    process = subprocess.Popen(
+        [sys.executable, script_path],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
+
+    # Read stdout line by line as the scraper runs
+    # (If you only see logs in the log file, add some print() statements in main_new.py
+    # or configure Python's logging to go to stdout.)
+    for line in iter(process.stdout.readline, ""):
+        line = line.rstrip()
+        if line:
+            log_message(f"[OUT] {line}")
+    process.stdout.close()
+
+    # Read any remaining stderr output
+    err_output = process.stderr.read()
+    process.stderr.close()
+
+    return_code = process.wait()
+
+    # Show final status
+    if return_code == 0:
+        log_message("\nScraper completed successfully!")
+    else:
+        # If there was any error text, display it
+        if err_output.strip():
+            for err_line in err_output.splitlines():
+                log_message(f"[ERR] {err_line}")
+        log_message(f"\nScraper failed with return code {return_code}.")
+
+    # Provide a "Close" button
+    def close_window():
+        root.destroy()
+
+    close_button = tk.Button(root, text="Close", command=close_window)
+    close_button.pack(pady=5)
+
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()
